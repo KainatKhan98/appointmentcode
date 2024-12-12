@@ -1,8 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:pet/constants/constants.dart';
-import 'package:pet/features/home/home.dart';
+import 'package:pet/features/home/home.dart'; // Update this import path based on your project structure
 
 class AppointmentSelectionScreen extends StatefulWidget {
   final String userName;
@@ -26,10 +24,10 @@ class AppointmentSelectionScreen extends StatefulWidget {
 
 class _AppointmentSelectionScreenState
     extends State<AppointmentSelectionScreen> {
-  DateTime selectedDate = DateTime.now();
+  DateTime? selectedDate;
   String selectedSlot = '';
-  String address = ''; // Variable to store the entered address
-  String selectedPaymentMethod = ''; // To store the selected payment method
+  String address = '';
+  String selectedPaymentMethod = '';
   List<String> timeSlots = [
     '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM',
     '11:00 AM', '11:30 AM', '12:00 PM', '12:30 PM',
@@ -37,231 +35,209 @@ class _AppointmentSelectionScreenState
     '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
     '5:00 PM'
   ];
+  List<String> unavailableSlots = [];
 
-  // Function to select the date
-  Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: selectedDate,
-      firstDate: DateTime(2023),
-      lastDate: DateTime(2101),
-    );
-    if (picked != null && picked != selectedDate)
-      setState(() {
-        selectedDate = picked;
-      });
-  }
+  // Fetch unavailable slots from Firestore
+  Future<void> fetchUnavailableSlots() async {
+    if (selectedDate == null) return;
 
-  // Function to select the time slot
-  void _selectTimeSlot(String slot) {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('appointments')
+        .where('date', isEqualTo: selectedDate!.toIso8601String().split('T')[0])
+        .get();
+
     setState(() {
-      selectedSlot = slot;
+      unavailableSlots = snapshot.docs.map((doc) => doc['slot'] as String).toList();
     });
   }
 
-  // Validate if all inputs are valid
-  bool _isValidSelection() {
-    return selectedSlot.isNotEmpty &&
-        selectedDate != null &&
-        address.isNotEmpty &&
-        selectedPaymentMethod.isNotEmpty;
+  // Save appointment to Firestore and navigate to Home
+  Future<void> saveAppointment() async {
+    if (selectedDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please select a date.')),
+      );
+      return;
+    }
+
+    if (selectedSlot.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please select a time slot.')),
+      );
+      return;
+    }
+
+    if (address.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please enter your address.')),
+      );
+      return;
+    }
+
+    if (selectedPaymentMethod.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please select a payment method.')),
+      );
+      return;
+    }
+
+    await FirebaseFirestore.instance.collection('appointments').add({
+      'userName': widget.userName,
+      'userEmail': widget.userEmail,
+      'serviceName': widget.name,
+      'description': widget.description,
+      'price': widget.price,
+      'date': selectedDate!.toIso8601String().split('T')[0],
+      'slot': selectedSlot,
+      'address': address,
+      'paymentMethod': selectedPaymentMethod,
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Appointment booked successfully!')),
+    );
+
+    // Navigate to Home screen
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => Home()), // Replace with your Home widget
+          (route) => false, // Remove all routes below
+    );
   }
 
-  // Navigate to home screen after successful booking
-  void _navigateToHome() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => Home()),
+  // Select date
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2101),
     );
+    if (picked != null) {
+      setState(() {
+        selectedDate = picked;
+        selectedSlot = ''; // Reset selected slot
+      });
+      await fetchUnavailableSlots(); // Fetch slots for the selected date
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Select Appointment'),
-        backgroundColor: backgrndclrpurple,
-      ),
+      appBar: AppBar(title: Text('Select Appointment')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Date Picker
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "Select Date:",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    "${selectedDate.toLocal()}".split(' ')[0],
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.calendar_today),
-                    onPressed: () => _selectDate(context),
-                  ),
-                ],
-              ),
-              SizedBox(height: 20),
-          
-              // Time Slot Selection using GridView
-              Text(
-                "Select Time Slot:",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 10),
-              GridView.builder(
-                shrinkWrap: true,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 4.0,
-                  mainAxisSpacing: 4.0,
-                  childAspectRatio: 2.5,
+        child: ListView(
+          children: [
+            Text('Service: ${widget.name}', style: TextStyle(fontSize: 18)),
+            SizedBox(height: 8),
+            Text(widget.description),
+            SizedBox(height: 8),
+            Text('Price: \$${widget.price.toStringAsFixed(2)}'),
+            SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Select Date:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(selectedDate != null
+                    ? selectedDate!.toLocal().toString().split(' ')[0]
+                    : 'No date selected'),
+                IconButton(
+                  icon: Icon(Icons.calendar_today),
+                  onPressed: () => _selectDate(context),
                 ),
-                itemCount: timeSlots.length,
-                itemBuilder: (context, index) {
-                  return ChoiceChip(
-                    label: Text(timeSlots[index]),
-                    selected: selectedSlot == timeSlots[index],
-                    onSelected: (selected) {
-                      _selectTimeSlot(timeSlots[index]);
-                    },
-                    backgroundColor: backgrndclrpurple,
-                    selectedColor: Colors.purple[200],
-                    labelStyle: TextStyle(color: Colors.black),
-                  );
-                },
+              ],
+            ),
+            SizedBox(height: 20),
+            Text('Select Time Slot:', style: TextStyle(fontWeight: FontWeight.bold)),
+            SizedBox(height: 10),
+            GridView.builder(
+              shrinkWrap: true,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
               ),
-              SizedBox(height: 20),
-          
-              // Address Input Field
-              Text(
-                "Enter Address:",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              itemCount: timeSlots.length,
+              itemBuilder: (context, index) {
+                String slot = timeSlots[index];
+                bool isUnavailable = unavailableSlots.contains(slot);
+                return GestureDetector(
+                  onTap: isUnavailable
+                      ? null
+                      : () {
+                    setState(() {
+                      selectedSlot = slot;
+                    });
+                  },
+                  child: Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isUnavailable
+                          ? Colors.grey
+                          : (selectedSlot == slot ? Colors.blue : Colors.white),
+                      border: Border.all(
+                        color: selectedSlot == slot ? Colors.blue : Colors.black,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Text(
+                        slot,
+                        style: TextStyle(
+                          color: isUnavailable ? Colors.white : Colors.black,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            SizedBox(height: 20),
+            TextField(
+              decoration: InputDecoration(
+                labelText: 'Enter Address',
+                border: OutlineInputBorder(),
               ),
-              SizedBox(height: 10),
-              TextField(
+              onChanged: (value) {
+                setState(() {
+                  address = value;
+                });
+              },
+            ),
+            SizedBox(height: 20),
+            Text('Select Payment Method:', style: TextStyle(fontWeight: FontWeight.bold)),
+            ListTile(
+              title: Text('Credit Card'),
+              leading: Radio<String>(
+                value: 'Credit Card',
+                groupValue: selectedPaymentMethod,
                 onChanged: (value) {
                   setState(() {
-                    address = value;
+                    selectedPaymentMethod = value!;
                   });
                 },
-                decoration: InputDecoration(
-                  hintText: 'Enter your address',
-                  border: OutlineInputBorder(),
-                ),
               ),
-              SizedBox(height: 20),
-          
-              // Payment Method Selection
-              Text(
-                "Select Payment Method:",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            ListTile(
+              title: Text('Cash on Delivery'),
+              leading: Radio<String>(
+                value: 'Cash on Delivery',
+                groupValue: selectedPaymentMethod,
+                onChanged: (value) {
+                  setState(() {
+                    selectedPaymentMethod = value!;
+                  });
+                },
               ),
-              SizedBox(height: 10),
-              Column(
-                children: [
-                  ListTile(
-                    title: Text("Credit/Debit Card"),
-                    leading: Radio<String>(
-                      value: "Credit/Debit Card",
-                      groupValue: selectedPaymentMethod,
-                      onChanged: (value) {
-                        setState(() {
-                          selectedPaymentMethod = value!;
-                        });
-                      },
-                    ),
-                  ),
-                  ListTile(
-                    title: Text("Digital Wallets"),
-                    leading: Radio<String>(
-                      value: "Digital Wallets",
-                      groupValue: selectedPaymentMethod,
-                      onChanged: (value) {
-                        setState(() {
-                          selectedPaymentMethod = value!;
-                        });
-                      },
-                    ),
-                  ),
-                  ListTile(
-                    title: Text("Bank Transfer"),
-                    leading: Radio<String>(
-                      value: "Bank Transfer",
-                      groupValue: selectedPaymentMethod,
-                      onChanged: (value) {
-                        setState(() {
-                          selectedPaymentMethod = value!;
-                        });
-                      },
-                    ),
-                  ),
-                  ListTile(
-                    title: Text("Cash on Delivery (COD)"),
-                    leading: Radio<String>(
-                      value: "Cash on Delivery",
-                      groupValue: selectedPaymentMethod,
-                      onChanged: (value) {
-                        setState(() {
-                          selectedPaymentMethod = value!;
-                        });
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 20),
-          
-              // Confirm Button
-              Center(
-                child: ElevatedButton(
-                  onPressed: () {
-                    if (_isValidSelection()) {
-                      String currentUserEmail =
-                          FirebaseAuth.instance.currentUser?.email ?? 'No User';
-          
-                      FirebaseFirestore.instance.collection('appointments').add({
-                        'providerName': widget.userName,
-                        'providerEmail': widget.userEmail,
-                        'serviceName': widget.name,
-                        'appointmentDate': selectedDate,
-                        'appointmentTime': selectedSlot,
-                        'userEmail': currentUserEmail,
-                        'address': address,
-                        'paymentMethod': selectedPaymentMethod,
-                      }).then((_) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Appointment booked successfully!')),
-                        );
-                        _navigateToHome();
-                      }).catchError((e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Failed to book appointment: $e')),
-                        );
-                      });
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                            content: Text(
-                                'Please select a valid date, time, address, and payment method')),
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: backgrndclrpurple,
-                    padding: EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-                    textStyle: TextStyle(fontSize: 18),
-                  ),
-                  child: Text("Confirm Booking"),
-                ),
-              ),
-            ],
-          ),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: saveAppointment,
+              child: Text('Confirm Appointment'),
+            ),
+          ],
         ),
       ),
     );
